@@ -7,24 +7,44 @@ Handles model loading, unloading, and state management.
 import subprocess
 import json
 import time
+import os
+import re
 from typing import List, Dict, Optional
 
 class ModelManager:
-    def __init__(self):
+    def __init__(self, ollama_host: Optional[str] = None):
         self.current_model = None
+        self._env = None
+        self.ollama_host = ollama_host or os.environ.get('OLLAMA_HOST', 'http://localhost:11434')
+    
+    def _ensure_env(self):
+        if self._env is None:
+            self._env = os.environ.copy()
+            self._env['OLLAMA_HOST'] = self.ollama_host
     
     def get_available_models(self) -> List[Dict]:
         """Get list of available models from Ollama."""
+        self._ensure_env()
         try:
             result = subprocess.run(
-                ["ollama", "list", "--json"],
+                ["ollama", "list"],
                 capture_output=True,
                 text=True,
-                check=True
+                env=self._env
             )
-            models = json.loads(result.stdout)
-            return models.get("models", [])
-        except (subprocess.CalledProcessError, json.JSONDecodeError) as e:
+            if result.returncode != 0:
+                print(f"Error getting models: {result.stderr}")
+                return []
+            
+            lines = result.stdout.strip().split('\n')
+            models = []
+            for line in lines[1:]:
+                parts = line.split()
+                if len(parts) >= 5:
+                    model_name = parts[0]
+                    models.append({"name": model_name, "id": parts[1]})
+            return models
+        except Exception as e:
             print(f"Error getting models: {e}")
             return []
     
@@ -33,32 +53,31 @@ class ModelManager:
         if self.current_model == model_name:
             return True
             
+        self._ensure_env()
+            
         try:
             # First unload current model
             if self.current_model:
                 subprocess.run(["ollama", "unload", self.current_model], 
-                             capture_output=True, check=True)
+                             capture_output=True, env=self._env)
             
-            # Load new model
+            # Load new model - just check if it exists
             result = subprocess.run(
-                ["ollama", "run", model_name, "ping"],
+                ["ollama", "list"],
                 capture_output=True,
                 text=True,
-                timeout=30
+                env=self._env
             )
             
-            if result.returncode == 0:
+            if model_name in result.stdout:
                 self.current_model = model_name
                 return True
             else:
-                print(f"Failed to load model {model_name}: {result.stderr}")
+                print(f"Model {model_name} not found")
                 return False
                 
-        except subprocess.TimeoutExpired:
-            print(f"Timeout loading model {model_name}")
-            return False
         except Exception as e:
-            print(f"Error loading model {model_name}: {e}")
+            print(f"Error checking model {model_name}: {e}")
             return False
     
     def unload_model(self) -> bool:
@@ -68,7 +87,7 @@ class ModelManager:
                 subprocess.run(
                     ["ollama", "unload", self.current_model],
                     capture_output=True,
-                    check=True
+                    env=self._env
                 )
                 self.current_model = None
                 return True

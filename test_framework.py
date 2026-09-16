@@ -7,8 +7,9 @@ Demonstrates the concepts for evaluating local Ollama models.
 import subprocess
 import time
 import json
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import os
+from model_manager import ModelManager
 
 class OllamaTestFramework:
     """
@@ -19,9 +20,12 @@ class OllamaTestFramework:
     and resource management.
     """
     
-    def __init__(self):
-        self.model_manager = ModelManager()
+    def __init__(self, ollama_host: Optional[str] = None):
+        self.model_manager = ModelManager(ollama_host)
         self.results = []
+        self._env = os.environ.copy()
+        if ollama_host:
+            self._env['OLLAMA_HOST'] = ollama_host
     
     def get_available_models(self) -> List[Dict]:
         """Get all available Ollama models."""
@@ -93,7 +97,8 @@ class OllamaTestFramework:
                     ["ollama", "run", model_name, prompt],
                     capture_output=True,
                     text=True,
-                    timeout=30
+                    timeout=30,
+                    env=self._env
                 )
                 
                 end_time = time.time()
@@ -150,7 +155,8 @@ class OllamaTestFramework:
                     ["ollama", "run", model_name, prompt],
                     capture_output=True,
                     text=True,
-                    timeout=30
+                    timeout=30,
+                    env=self._env
                 )
                 
                 end_time = time.time()
@@ -202,7 +208,8 @@ class OllamaTestFramework:
                     ["ollama", "run", model_name, test_prompt],
                     capture_output=True,
                     text=True,
-                    timeout=15
+                    timeout=15,
+                    env=self._env
                 )
                 
                 end_time = time.time()
@@ -253,80 +260,6 @@ class OllamaTestFramework:
             with open(filename, 'w') as f:
                 json.dump(self.results, f, indent=2)
             print(f"Results saved to {filename}")
-
-class ModelManager:
-    """Handles model loading/unloading operations."""
-    
-    def __init__(self):
-        self.current_model = None
-    
-    def get_available_models(self) -> List[Dict]:
-        """Get list of available models from Ollama."""
-        try:
-            result = subprocess.run(
-                ["ollama", "list", "--json"],
-                capture_output=True,
-                text=True,
-                check=True
-            )
-            models = json.loads(result.stdout)
-            return models.get("models", [])
-        except (subprocess.CalledProcessError, json.JSONDecodeError, FileNotFoundError) as e:
-            print(f"Error getting models: {e}")
-            return []
-    
-    def load_model(self, model_name: str) -> bool:
-        """Load a specific model."""
-        if self.current_model == model_name:
-            return True
-            
-        try:
-            # First unload current model
-            if self.current_model:
-                subprocess.run(["ollama", "unload", self.current_model], 
-                             capture_output=True, check=True)
-            
-            # Load new model
-            result = subprocess.run(
-                ["ollama", "run", model_name, "ping"],
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
-            
-            if result.returncode == 0:
-                self.current_model = model_name
-                return True
-            else:
-                print(f"Failed to load model {model_name}: {result.stderr}")
-                return False
-                
-        except subprocess.TimeoutExpired:
-            print(f"Timeout loading model {model_name}")
-            return False
-        except Exception as e:
-            print(f"Error loading model {model_name}: {e}")
-            return False
-    
-    def unload_model(self) -> bool:
-        """Unload current model."""
-        if self.current_model:
-            try:
-                subprocess.run(
-                    ["ollama", "unload", self.current_model],
-                    capture_output=True,
-                    check=True
-                )
-                self.current_model = None
-                return True
-            except Exception as e:
-                print(f"Error unloading model: {e}")
-                return False
-        return True
-    
-    def is_model_loaded(self, model_name: str) -> bool:
-        """Check if a model is currently loaded."""
-        return self.current_model == model_name
 
 def main():
     """Main execution function."""
